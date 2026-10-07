@@ -11,6 +11,7 @@ import {
 import { ElMessage } from 'element-plus';
 import type { DiagramNode, NodeKind } from '../types/diagram';
 import { useDiagramStore } from '../stores/diagram';
+import { newField } from '../utils/revisions';
 
 const store = useDiagramStore();
 
@@ -76,7 +77,10 @@ function addTableField(): void {
     return;
   }
   store.patchNode(store.activeNode.id, {
-    fields: [...store.activeNode.fields, 'new_column  VARCHAR(80)'],
+    fields: [
+      ...store.activeNode.fields,
+      newField('new_column  VARCHAR(80)', store.docRev),
+    ],
     height: store.activeNode.height + 34,
   });
 }

@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { computed, ref, watch } from 'vue';
 import { useDiagramStore } from '../stores/diagram';
 import type { AnchorSide } from '../types/diagram';
+import { makeId } from '../utils/revisions';
 
 const store = useDiagramStore();
 const textDraft = ref('');
@@ -13,7 +14,7 @@ watch(
   () => store.activeNode,
   (node) => {
     textDraft.value = node?.text ?? '';
-    fieldDraft.value = node?.fields.join('\n') ?? '';
+    fieldDraft.value = node?.fields.map((field) => field.text).join('\n') ?? '';
   },
   { immediate: true, deep: true },
 );
@@ -34,13 +35,18 @@ function applyText() {
 
 function applyFields() {
   if (store.activeNode?.kind !== 'table') return;
-  const fields = fieldDraft.value
+  const texts = fieldDraft.value
     .split('\n')
     .map((field) => field.trim())
     .filter(Boolean);
+  const oldFields = store.activeNode.fields;
   patchNode({
-    fields,
-    height: Math.max(120, 76 + fields.length * 34),
+    fields: texts.map((text, index) => ({
+      id: oldFields[index]?.id ?? makeId('field'),
+      text,
+      rev: store.docRev,
+    })),
+    height: Math.max(120, 76 + texts.length * 34),
   });
 }
 

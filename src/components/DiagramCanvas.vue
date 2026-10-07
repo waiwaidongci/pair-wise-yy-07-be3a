@@ -264,7 +264,7 @@ function createDiagramNode(node: DiagramNode): Konva.Group {
           x: 12,
           y,
           width: node.width - 24,
-          text: field,
+          text: field.text,
           fill: '#475467',
           fontFamily: 'SFMono-Regular, Menlo, monospace',
           fontSize: 11,

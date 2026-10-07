@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  Back,
   Bottom,
   Connection,
   CopyDocument,
@@ -16,21 +15,41 @@ import {
   Top,
   Unlock,
   Upload,
+  Warning,
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import { nextTick, ref } from 'vue';
+import { nextTick, onMounted, ref, watch } from 'vue';
 import DiagramCanvas from '../components/DiagramCanvas.vue';
+import ConflictDialog from '../components/ConflictDialog.vue';
 import PropertiesPanel from '../components/PropertiesPanel.vue';
 import ShapePalette from '../components/ShapePalette.vue';
 import { useDiagramStore } from '../stores/diagram';
-import type { DiagramDocument } from '../types/diagram';
+import { migrateDoc } from '../utils/revisions';
 
 const store = useDiagramStore();
 const importInput = ref<HTMLInputElement | null>(null);
 
+onMounted(() => {
+  store.startSync();
+  if (store.recoveredFromCrash) {
+    ElMessage.warning('上次保存中断，已从最后稳定版本恢复，正在重试保存…');
+    void store.saveNow();
+  }
+});
+
+// 自动并入其他标签页的非冲突改动后提示。
+watch(
+  () => store.lastAutoMerged,
+  (count) => {
+    if (count > 0) {
+      ElMessage.success(`已同步其他标签页的 ${count} 处改动`);
+      store.lastAutoMerged = 0;
+    }
+  },
+);
+
 function saveNow() {
-  store.persistSoon();
-  ElMessage.success('图表已保存到本机浏览器');
+  void store.saveNow();
 }
 
 function openImport() {
@@ -42,14 +61,21 @@ async function importFile(event: Event) {
   const file = input.files?.[0];
   if (!file) return;
   try {
-    const document = JSON.parse(await file.text()) as DiagramDocument;
-    if (document.version !== 1 || !Array.isArray(document.nodes) || !Array.isArray(document.connectors)) {
-      throw new Error('文件结构不符合 FrameFlow v1 格式');
+    const raw = JSON.parse(await file.text());
+    const migrated = migrateDoc(raw);
+    if (!migrated.ok) {
+      ElMessage.error(`导入失败：${migrated.error}`);
+      return;
     }
-    store.importDocument(document);
-    ElMessage.success(`已导入 ${file.name}`);
+    // 导入走与远端相同的三方合并：冲突进预览，不覆盖当前图。
+    store.applyRemote(migrated.doc);
+    if (store.conflictCount > 0) {
+      ElMessage.warning('导入文件与当前编辑存在冲突，请在并列两版中确认');
+    } else {
+      ElMessage.success(`已导入 ${file.name}`);
+    }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '导入失败');
+    ElMessage.error(error instanceof Error ? error.message : '导入失败，当前图表未受影响');
   } finally {
     input.value = '';
   }
@@ -73,8 +99,16 @@ function run(action: () => void, message?: string) {
         </div>
       </div>
       <div class="document-title">
-        <el-input v-model="store.title" class="title-input" @change="store.persistSoon()" />
-        <span class="save-state"><Finished /> 已自动保存</span>
+        <el-input
+          :model-value="store.title"
+          class="title-input"
+          @change="(value: unknown) => store.setTitle(String(value))"
+        />
+        <span class="save-state">
+          <Finished v-if="store.saveState === 'saved'" />
+          <Warning v-else-if="store.saveState === 'error'" class="save-state--error" />
+          {{ store.saveState === 'saving' ? '保存中…' : store.saveState === 'error' ? '保存失败' : '已自动保存' }}
+        </span>
       </div>
       <div class="header-actions">
         <router-link class="guide-link" to="/guide">快捷键说明</router-link>
@@ -176,10 +210,13 @@ function run(action: () => void, message?: string) {
       <span><Document /> {{ store.nodes.length }} 个图元</span>
       <span><Connection /> {{ store.connectors.length }} 条连接</span>
       <span>选择 {{ store.selectedIds.length }} 项</span>
+      <span v-if="store.groups.length">分组 {{ store.groups.length }}</span>
       <span class="status-spacer" />
       <span>缩放 {{ Math.round(store.zoom * 100) }}%</span>
       <span>网格 {{ store.gridSize }} px</span>
-      <span class="status-online"><i /> 本地草稿已启用</span>
+      <span class="status-online"><i /> 修订草稿已启用</span>
     </footer>
+
+    <ConflictDialog />
   </div>
 </template>

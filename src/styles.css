@@ -115,6 +115,10 @@ textarea {
   white-space: nowrap;
 }
 
+.save-state--error {
+  color: #c2413b;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
