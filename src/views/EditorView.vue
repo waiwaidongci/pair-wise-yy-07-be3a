@@ -18,19 +18,58 @@ import {
   Upload,
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import { nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import ConflictDialog from '../components/ConflictDialog.vue';
 import DiagramCanvas from '../components/DiagramCanvas.vue';
 import PropertiesPanel from '../components/PropertiesPanel.vue';
 import ShapePalette from '../components/ShapePalette.vue';
 import { useDiagramStore } from '../stores/diagram';
-import type { DiagramDocument } from '../types/diagram';
 
 const store = useDiagramStore();
 const importInput = ref<HTMLInputElement | null>(null);
+const titleDraft = ref(store.title);
+
+watch(
+  () => store.title,
+  (value) => {
+    titleDraft.value = value;
+  },
+);
+
+const syncMeta = computed(() => {
+  switch (store.syncState) {
+    case 'synced':
+      return { text: store.syncMessage || `已同步 r${store.headRev}`, tone: 'status-online' };
+    case 'ahead':
+      return { text: `本页有未提交修订（r${store.headRev} → 本地 r${store.localSeq}）`, tone: 'status-ahead' };
+    case 'remote-ahead':
+      return { text: '另一标签页有新版本，待确认合并', tone: 'status-remote' };
+    case 'conflict':
+      return { text: '存在同对象冲突，等待并列两版处理', tone: 'status-conflict' };
+    case 'recovered-stable':
+      return { text: '已从最后稳定版本恢复', tone: 'status-remote' };
+    case 'recovered-staging':
+      return { text: '已从暂存草稿恢复', tone: 'status-remote' };
+    default:
+      return { text: '本地草稿已启用', tone: 'status-online' };
+  }
+});
+
+function commitTitle() {
+  const next = titleDraft.value.trim() || '未命名图表';
+  titleDraft.value = next;
+  if (next !== store.title) store.setTitle(next);
+}
 
 function saveNow() {
-  store.persistSoon();
-  ElMessage.success('图表已保存到本机浏览器');
+  const result = store.flushPersist();
+  if (result.ok) {
+    ElMessage.success('本页改动已作为增量修订提交到本机草稿');
+  } else if (result.reason === 'conflict') {
+    ElMessage.warning('另一标签页修改了同一对象，请在并列两版窗口中确认');
+  } else {
+    ElMessage.error(`保存失败：${result.reason ?? '未知错误'}（已尝试从稳定版本恢复）`);
+  }
 }
 
 function openImport() {
@@ -42,14 +81,17 @@ async function importFile(event: Event) {
   const file = input.files?.[0];
   if (!file) return;
   try {
-    const document = JSON.parse(await file.text()) as DiagramDocument;
-    if (document.version !== 1 || !Array.isArray(document.nodes) || !Array.isArray(document.connectors)) {
-      throw new Error('文件结构不符合 FrameFlow v1 格式');
+    const content = await file.text();
+    const result = store.importJson(content, file.name);
+    if (!result.ok) {
+      ElMessage.error(result.error ?? '导入失败');
+    } else if (result.pending) {
+      ElMessage.warning('导入文件与本页改动有分叉，请在并列两版窗口中确认；当前画布未改动');
+    } else {
+      ElMessage.success(`已导入 ${file.name}`);
     }
-    store.importDocument(document);
-    ElMessage.success(`已导入 ${file.name}`);
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '导入失败');
+    ElMessage.error(error instanceof Error ? error.message : '导入失败，当前画布未改动');
   } finally {
     input.value = '';
   }
@@ -60,6 +102,15 @@ function run(action: () => void, message?: string) {
   if (message) ElMessage.success(message);
   void nextTick();
 }
+
+onMounted(() => {
+  store.bindStorageSync();
+  if (store.syncMessage) ElMessage.info(store.syncMessage);
+});
+
+onBeforeUnmount(() => {
+  store.teardownStorageSync();
+});
 </script>
 
 <template>
@@ -73,13 +124,20 @@ function run(action: () => void, message?: string) {
         </div>
       </div>
       <div class="document-title">
-        <el-input v-model="store.title" class="title-input" @change="store.persistSoon()" />
-        <span class="save-state"><Finished /> 已自动保存</span>
+        <el-input
+          v-model="titleDraft"
+          class="title-input"
+          @change="commitTitle"
+          @blur="commitTitle"
+        />
+        <span class="save-state">
+          <Finished /> r{{ store.headRev }}
+        </span>
       </div>
       <div class="header-actions">
         <router-link class="guide-link" to="/guide">快捷键说明</router-link>
         <el-button :icon="Upload" @click="openImport">导入 JSON</el-button>
-        <el-button type="primary" :icon="Download" @click="saveNow">保存</el-button>
+        <el-button type="primary" :icon="Download" @click="saveNow">保存本页改动</el-button>
         <input
           ref="importInput"
           class="hidden-input"
@@ -92,7 +150,7 @@ function run(action: () => void, message?: string) {
 
     <section class="editor-toolbar">
       <div class="tool-group">
-        <el-tooltip content="撤销 Ctrl/Cmd + Z">
+        <el-tooltip content="撤销 Ctrl/Cmd + Z（生成反向修订）">
           <el-button
             :icon="RefreshLeft"
             :disabled="!store.canUndo"
@@ -175,11 +233,16 @@ function run(action: () => void, message?: string) {
     <footer class="editor-status">
       <span><Document /> {{ store.nodes.length }} 个图元</span>
       <span><Connection /> {{ store.connectors.length }} 条连接</span>
+      <span>分组 {{ store.groups.length }} 个</span>
       <span>选择 {{ store.selectedIds.length }} 项</span>
       <span class="status-spacer" />
       <span>缩放 {{ Math.round(store.zoom * 100) }}%</span>
       <span>网格 {{ store.gridSize }} px</span>
-      <span class="status-online"><i /> 本地草稿已启用</span>
+      <span class="revision-state" :class="syncMeta.tone">
+        <i /> {{ syncMeta.text }}
+      </span>
     </footer>
+
+    <ConflictDialog />
   </div>
 </template>

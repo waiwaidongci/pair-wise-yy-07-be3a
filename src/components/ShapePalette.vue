@@ -9,8 +9,9 @@ import {
   Plus,
 } from '@element-plus/icons-vue';
 import { ElMessage } from 'element-plus';
-import type { DiagramNode, NodeKind } from '../types/diagram';
+import type { NodeKind } from '../types/diagram';
 import { useDiagramStore } from '../stores/diagram';
+import { makeId } from '../utils/revision';
 
 const store = useDiagramStore();
 
@@ -76,7 +77,7 @@ function addTableField(): void {
     return;
   }
   store.patchNode(store.activeNode.id, {
-    fields: [...store.activeNode.fields, 'new_column  VARCHAR(80)'],
+    fields: [...store.activeNode.fields, { id: makeId('field'), text: 'new_column  VARCHAR(80)' }],
     height: store.activeNode.height + 34,
   });
 }

@@ -264,7 +264,7 @@ function createDiagramNode(node: DiagramNode): Konva.Group {
           x: 12,
           y,
           width: node.width - 24,
-          text: field,
+          text: field.text,
           fill: '#475467',
           fontFamily: 'SFMono-Regular, Menlo, monospace',
           fontSize: 11,
@@ -273,6 +273,26 @@ function createDiagramNode(node: DiagramNode): Konva.Group {
         }),
       );
     });
+  }
+
+  // 修订链状态标记：另一页修改同一对象时旧预览失效（橙），确认冲突时并列两版（红）。
+  const stateKind: 'conflict' | 'stale' | null = store.entityConflict('node', node.id)
+    ? 'conflict'
+    : store.entityStale('node', node.id)
+      ? 'stale'
+      : null;
+  if (stateKind) {
+    group.add(
+      new Konva.Circle({
+        x: node.width - 10,
+        y: 10,
+        radius: 6,
+        fill: stateKind === 'conflict' ? '#d92d20' : '#f79009',
+        stroke: '#ffffff',
+        strokeWidth: 1.5,
+        listening: false,
+      }),
+    );
   }
 
   if (node.locked) {
@@ -302,7 +322,7 @@ function createDiagramNode(node: DiagramNode): Konva.Group {
       store.nodes.filter((item) => item.groupId === node.groupId).forEach((item) => groupIds.add(item.id));
     }
     const ids = [...groupIds];
-    store.checkpoint();
+    // 一次拖拽产生一条修订；位置在 dragend 通过 commitPositions 统一提交。
     dragState = {
       ids,
       primaryId: node.id,
@@ -464,13 +484,30 @@ function createCenteredText(text: string, width: number, height: number, maxWidt
 function createConnectorNode(connector: DiagramConnector): Konva.Group {
   const points = routeConnector(connector, store.nodes);
   const selected = store.selectedConnectorId === connector.id;
+  const stateKind: 'conflict' | 'stale' | null = store.entityConflict('connector', connector.id)
+    ? 'conflict'
+    : store.entityStale('connector', connector.id)
+      ? 'stale'
+      : null;
   const group = new Konva.Group({ listening: true });
   const arrow = new Konva.Arrow({
     points,
-    stroke: selected ? '#1769ff' : connector.color,
-    fill: selected ? '#1769ff' : connector.color,
-    strokeWidth: selected ? 2.8 : 1.8,
-    dash: connector.dashed ? [9, 6] : undefined,
+    stroke: selected
+      ? '#1769ff'
+      : stateKind === 'conflict'
+        ? '#d92d20'
+        : stateKind === 'stale'
+          ? '#b54708'
+          : connector.color,
+    fill: selected
+      ? '#1769ff'
+      : stateKind === 'conflict'
+        ? '#d92d20'
+        : stateKind === 'stale'
+          ? '#b54708'
+          : connector.color,
+    strokeWidth: selected || stateKind ? 2.8 : 1.8,
+    dash: connector.dashed ? [9, 6] : stateKind ? [12, 5] : undefined,
     pointerLength: 10,
     pointerWidth: 9,
     lineJoin: 'round',
@@ -636,10 +673,11 @@ function exportSvg() {
 }
 
 function exportJson() {
+  // 导出沿用当前修订关系：完整 v2 文档（含修订链与各对象 rev）。
   const content = JSON.stringify(store.snapshot(), null, 2);
   downloadBlob(
     new Blob([content], { type: 'application/json;charset=utf-8' }),
-    `${store.title}.json`,
+    `${store.title || 'frameflow'}-r${store.headRev}.json`,
   );
 }
 
@@ -690,7 +728,6 @@ function handleKeyboard(event: KeyboardEvent) {
       ArrowDown: { x: 0, y: amount },
     }[event.key];
     if (!delta) return;
-    store.checkpoint();
     store.commitPositions(
       Object.fromEntries(
         store.selectedNodes.map((node) => [
@@ -698,6 +735,7 @@ function handleKeyboard(event: KeyboardEvent) {
           { x: node.x + delta.x, y: node.y + delta.y },
         ]),
       ),
+      { label: '方向键移动图元' },
     );
     void nextTick(renderDiagram);
   }
@@ -721,7 +759,16 @@ onBeforeUnmount(() => {
 });
 
 watch(
-  () => [store.nodes, store.connectors, store.selectedIds, store.selectedConnectorId, store.toolMode],
+  () => [
+    store.nodes,
+    store.connectors,
+    store.groups,
+    store.selectedIds,
+    store.selectedConnectorId,
+    store.toolMode,
+    store.staleKeys,
+    store.conflictKeys,
+  ],
   () => void nextTick(renderDiagram),
   { deep: true },
 );

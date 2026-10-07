@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { computed, ref, watch } from 'vue';
 import { useDiagramStore } from '../stores/diagram';
 import type { AnchorSide } from '../types/diagram';
+import { makeId } from '../utils/revision';
 
 const store = useDiagramStore();
 const textDraft = ref('');
@@ -13,7 +14,7 @@ watch(
   () => store.activeNode,
   (node) => {
     textDraft.value = node?.text ?? '';
-    fieldDraft.value = node?.fields.join('\n') ?? '';
+    fieldDraft.value = node?.fields.map((field) => field.text).join('\n') ?? '';
   },
   { immediate: true, deep: true },
 );
@@ -34,13 +35,22 @@ function applyText() {
 
 function applyFields() {
   if (store.activeNode?.kind !== 'table') return;
-  const fields = fieldDraft.value
+  // 字段是带稳定身份的对象：逐行文本对应到原字段 id，新增行分配新 id，删除行即删除对象。
+  const lines = fieldDraft.value
     .split('\n')
     .map((field) => field.trim())
     .filter(Boolean);
+  const nextFields = lines.map((text, index) => {
+    const existing = store.activeNode?.fields[index];
+    return existing ? { id: existing.id, text } : { id: makeId('field'), text };
+  });
+  const unchanged =
+    nextFields.length === store.activeNode.fields.length &&
+    nextFields.every((field, index) => field.id === store.activeNode?.fields[index]?.id && field.text === store.activeNode?.fields[index]?.text);
+  if (unchanged) return;
   patchNode({
-    fields,
-    height: Math.max(120, 76 + fields.length * 34),
+    fields: nextFields,
+    height: Math.max(120, 76 + nextFields.length * 34),
   });
 }
 

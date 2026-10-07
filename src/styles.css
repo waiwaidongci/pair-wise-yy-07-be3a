@@ -580,6 +580,38 @@ kbd {
   background: #12b76a;
 }
 
+.revision-state {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.revision-state i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-online {
+  color: #027a48;
+}
+
+.status-ahead {
+  color: #b54708;
+  background: #fffaeb;
+}
+
+.status-remote {
+  color: #175cd3;
+  background: #eff8ff;
+}
+
+.status-conflict {
+  color: #b42318;
+  background: #fef3f2;
+}
+
 .guide-page {
   height: 100%;
   overflow: auto;
