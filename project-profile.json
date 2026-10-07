@@ -1,0 +1,11 @@
+{
+  "projectId": "pair-wise-yy-07",
+  "projectName": "FrameFlow 流程图与 ERD 编辑器",
+  "category": "图形编辑器",
+  "businessDomain": "研发工具",
+  "projectForm": "完整项目",
+  "codeScope": "frontend",
+  "languages": "Vue 3, TypeScript, Element Plus, Pinia, Konva, Vue Router, Vite",
+  "summary": "流程图与 ERD 编辑器，支持锚点连线、自动路由、对齐参考线、缩略图、撤销重做与 SVG 导出。",
+  "containerized": false
+}
